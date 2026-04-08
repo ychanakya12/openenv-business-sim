@@ -7,7 +7,7 @@ def grade(env) -> float:
     Also rewards reputation maintenance (Factor 6).
     """
     if not env.history:
-        return 0.001
+        return 0.01
 
     # Factor 1: profit growth
     growth        = (env.budget - 100_000.0) / 100_000.0
@@ -18,4 +18,4 @@ def grade(env) -> float:
 
     # Weighted combination
     raw = growth_score * 0.70 + rep_score * 0.30
-    return min(0.999, max(0.001, round(raw, 4)))
+    return round(min(max(raw, 0.01), 0.99), 3)

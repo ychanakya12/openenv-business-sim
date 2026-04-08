@@ -23,4 +23,4 @@ def grade(env) -> float:
         + low_burnout_score* 0.15
         + rep_target_bonus
     )
-    return min(0.999, max(0.001, round(raw, 4)))
+    return round(min(max(raw, 0.01), 0.99), 3)
