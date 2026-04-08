@@ -1,0 +1,56 @@
+name: business-sim-env
+version: 0.1.0
+description: >
+  Multi-agent business simulation where an AI CEO manages a software company
+  across quarters under adversarial conditions. Tests strategic decision-making
+  with delayed consequences across 6 real-world business factors:
+  profit potential, risk, team capability, market demand, reputation, and resources.
+
+tasks:
+  - id: single_quarter_survival
+    difficulty: easy
+    max_quarters: 1
+    description: End the quarter with positive cash flow. Balance risk vs profit.
+
+  - id: four_quarter_growth
+    difficulty: medium
+    max_quarters: 4
+    description: Grow revenue 30% over 4 quarters. Adapt to market phase shifts.
+
+  - id: adversarial_resilience
+    difficulty: hard
+    max_quarters: 8
+    description: Survive 8 quarters with reputation >= 0.6 despite adversarial shocks.
+
+action_space: CEOAction
+observation_space: CompanyObservation
+
+api:
+  reset: "POST /reset?task_id={task_id}"
+  step:  "POST /step?session_id={session_id}"
+  state: "GET  /state?session_id={session_id}"
+  tasks: "GET  /tasks"
+  grade: "GET  /grade?session_id={session_id}"
+
+reward:
+  type: continuous
+  range: [-2.0, 2.0]
+  partial_progress: true
+  description: >
+    Shaped reward combining net profit, reputation delta, burnout penalty,
+    and bankruptcy punishment. Partial credit awarded at each step.
+
+environment:
+  agents:
+    - name: MarketAgent
+      role: >
+        Simulates dynamic market conditions (boom/stable/recession phases)
+        using a Markov chain. Affects domain demand and project availability.
+    - name: AdversarialAgent
+      role: >
+        Injects realistic business shocks (client disputes, key dev quits,
+        budget audits) to prevent the CEO agent learning brittle strategies.
+    - name: DecisionAgent
+      role: >
+        The LLM-based CEO agent. Makes quarterly decisions via step() API.
+        Trained/evaluated by interacting with the environment.
