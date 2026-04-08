@@ -133,8 +133,8 @@ docker run -p 7860:7860 business-sim-env
 
 ```bash
 export API_BASE_URL="https://router.huggingface.co/v1"
-export MODEL_NAME="meta-llama/Llama-3.2-3B-Instruct"
-export HF_TOKEN="your_hf_token"
+export MODEL_NAME="meta-llama/Meta-Llama-3-8B-Instruct"
+export HF_TOKEN=HF_TOKEN
 export ENV_URL="http://localhost:7860"
 
 python inference.py
