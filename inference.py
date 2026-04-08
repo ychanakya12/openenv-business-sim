@@ -262,7 +262,9 @@ def run_task(client: OpenAI, task_id: str) -> float:
             print(f"  Reached max steps ({MAX_STEPS}).")
 
         # ── Grade ─────────────────────────────────────────────────────────────
-        final_score = env.grade()
+        raw_score = env.grade()
+        # OpenEnv requirement: scores must be strictly in (0.0, 1.0)
+        final_score = max(0.01, min(0.99, raw_score))
         print(f"[END] Task: {task_id} | Score: {final_score:.4f} | Total Reward: {total_reward:.4f}")
         return final_score
 
