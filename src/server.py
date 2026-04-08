@@ -125,10 +125,12 @@ def grade(session_id: str):
     """GET /grade — current episode score in [0.0, 1.0]."""
     env   = _require_session(session_id)
     cfg   = TASK_CONFIG[env.task_id]
-    score = cfg["grader"].grade(env)
+    raw   = cfg["grader"].grade(env)
+    # OpenEnv requirement: score must be strictly in (0.0, 1.0)
+    score = min(max(float(raw), 0.01), 0.99)
     return {
         "task_id":    env.task_id,
-        "score":      round(float(score), 4),
+        "score":      round(score, 4),
         "quarter":    env.quarter,
         "done":       env.done,
     }
