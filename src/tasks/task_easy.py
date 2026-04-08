@@ -8,6 +8,8 @@ def grade(env) -> float:
     """
     if env.budget <= 0:
         # Partial credit for how close they came
-        return round(max(0.0, 1.0 + env.budget / 50_000), 4)
+        val = 1.0 + env.budget / 50_000
+        return min(0.999, max(0.001, round(val, 4)))
     profit = env.budget - 100_000.0
-    return round(min(1.0, max(0.0, profit / 50_000.0)), 4)
+    val = profit / 50_000.0
+    return min(0.999, max(0.001, round(val, 4)))
