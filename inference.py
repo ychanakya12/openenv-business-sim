@@ -1,5 +1,5 @@
 """
-inference.py — Business Simulation Environment
+inference.py - Business Simulation Environment
 ================================================
 Baseline agent script. Mirrors the sample inference script pattern exactly.
 
@@ -20,26 +20,24 @@ import os
 import re
 import json
 import textwrap
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 from openai import OpenAI
 
 from src.business_sim_env import BusinessSimEnv
 from src.models import CEOAction
 
-# ── Configuration (mirrors sample script pattern exactly) ─────────────────────
+# ── Configuration ─────────────────────────────────────────────────────────────
 API_BASE_URL = os.getenv("API_BASE_URL", "https://router.huggingface.co/v1")
 API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME   = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 ENV_URL      = os.getenv("ENV_URL", "http://localhost:7860")
 
-MAX_STEPS   = 10      # safety cap (max_quarters per task is the real limit)
+MAX_STEPS   = 10
 TEMPERATURE = 0.2
 MAX_TOKENS  = 300
 
-# Safe fallback — do nothing, spend nothing
 FALLBACK_ACTION = CEOAction()
-
 DEBUG = True
 
 # ── Prompts ───────────────────────────────────────────────────────────────────
@@ -57,14 +55,14 @@ SYSTEM_PROMPT = textwrap.dedent("""
     6. RESOURCE / BURNOUT  — if team.burnout > 0.5, set reduce_workload=true first
 
     Decision heuristics:
-    - ALWAYS accept a project! Pick the available project with the highest profit that your team skill allows. Do not pass null unless there are 0 projects.
+    - ALWAYS accept a project! Pick the available project with the highest profit that your team skill allows.
     - Train if team.skill < 0.5 AND budget > 40000 → training_budget: 20000
     - Hire if team.size < 4 AND budget > 60000 → hire_count: 1
     - Use "premium" tech for AI/data projects with base_profit > 60000
     - Use "cheap" ONLY if budget < 20000 (accept tech debt risk)
     - Set reduce_workload=true if burnout > 0.55
 
-    CRITICAL: You MUST respond with ONLY a valid JSON object — absolutely no explanation, no conversational text, and no markdown fences like ```json.
+    CRITICAL: You MUST respond with ONLY a valid JSON object.
 
     JSON schema:
     {
@@ -78,12 +76,12 @@ SYSTEM_PROMPT = textwrap.dedent("""
 """).strip()
 
 
-# ── History helpers (mirrors sample script) ───────────────────────────────────
+# ── History helpers ───────────────────────────────────────────────────────────
 
 def build_history_lines(history: List[str]) -> str:
     if not history:
         return "None"
-    return "\n".join(history[-4:])   # last 4 turns for context window economy
+    return "\n".join(history[-4:])
 
 
 def build_user_prompt(step: int, observation, history: List[str]) -> str:
@@ -107,7 +105,7 @@ def build_user_prompt(step: int, observation, history: List[str]) -> str:
         Goal: {observation.goal}
         Quarter: {observation.quarter} / {observation.max_quarters}
 
-        ── Company State ──────────────────────────────────
+        -- Company State --
         Budget:         ${observation.budget:,.0f}
         Resource pool:  {observation.resource_pool:.0f} man-hrs
         Team size:      {observation.team.size} devs
@@ -116,29 +114,24 @@ def build_user_prompt(step: int, observation, history: List[str]) -> str:
         Reputation:     {observation.reputation:.2f} / 1.0
         Market phase:   {observation.market_phase}
         Domain demand:  {domain_demand_text}
-        Active risks:   {observation.active_risks or 'none'}
 
-        ── Available Projects ─────────────────────────────
+        -- Available Projects --
         {projects_text}
 
-        ── Feedback ───────────────────────────────────────
+        -- Feedback --
         Last result: {observation.last_action_result or 'none'}
         Last error:  {observation.last_action_error  or 'none'}
 
-        ── Recent History ─────────────────────────────────
+        -- Recent History --
         {build_history_lines(history)}
 
         Respond with ONLY the JSON object.
     """).strip()
 
 
-# ── Action parsing (mirrors sample script's parse_model_action) ───────────────
+# ── Action parsing ────────────────────────────────────────────────────────────
 
 def parse_action(response_text: str, observation) -> CEOAction:
-    """
-    Parse LLM JSON response → CEOAction.
-    Falls back to safe FALLBACK_ACTION on any parse error.
-    """
     action = FALLBACK_ACTION
     try:
         clean = re.sub(r"```(?:json)?|```", "", response_text).strip()
@@ -149,29 +142,35 @@ def parse_action(response_text: str, observation) -> CEOAction:
     except Exception as exc:
         if DEBUG:
             print(f"  [parse_action] Failed ({exc}). Using fallback.")
-            
-    # CRITICAL GUARDRAIL: If AI skipped or failed, forcefully take the best project to save budget
+
+    # If AI skipped, force the safest project
     if getattr(action, "accept_project_id", None) is None and observation.available_projects:
-        # Sort projects by profit/risk ratio to get the safest bet
-        safest = sorted(observation.available_projects, key=lambda p: p.base_profit / max(0.1, p.base_risk), reverse=True)[0]
+        safest = sorted(
+            observation.available_projects,
+            key=lambda p: p.base_profit / max(0.1, p.base_risk),
+            reverse=True,
+        )[0]
         action.accept_project_id = safest.id
-        
+
     return action
+
+
+# ── Clamp helper ──────────────────────────────────────────────────────────────
+
+def clamp_score(raw: float) -> float:
+    """Force score strictly into (0.0, 1.0) — never 0.0, never 1.0."""
+    # OpenEnv requirement: scores must be strictly in (0.0, 1.0)
+    return max(0.01, min(0.99, float(raw)))
 
 
 # ── Task runner ───────────────────────────────────────────────────────────────
 
 def run_task(client: OpenAI, task_id: str) -> float:
-    """
-    Run one full episode for a task.
-    Mirrors the main loop pattern from the sample inference script.
-    Returns final score in [0.0, 1.0].
-    """
+    """Run one full episode for a task. Returns final score."""
     print(f"\n{'='*60}")
     print(f"  TASK : {task_id}")
     print(f"{'='*60}")
 
-    # Mirrors: env = BrowserGymEnv.from_docker_image(image=..., env_vars=...)
     env = BusinessSimEnv.from_docker_image(
         image    = "business-sim-env:latest",
         env_vars = {
@@ -180,22 +179,20 @@ def run_task(client: OpenAI, task_id: str) -> float:
         },
     )
 
-    history:      List[str] = []
-    total_reward: float     = 0.0
+    total_reward: float = 0.0
+    history: List[str] = []
 
     try:
-        # ── reset() ──────────────────────────────────────────────────────────
+        # Reset
         result      = env.reset()
         observation = result.observation
         print(f"[START] Task: {task_id} | Goal: {observation.goal}")
 
         for step in range(1, MAX_STEPS + 1):
-            # Mirrors sample: if result.done: break early
             if result.done:
                 print("  Environment signalled done. Stopping early.")
                 break
 
-            # Build prompt and call LLM (OpenAI client — mandatory)
             user_prompt = build_user_prompt(step, observation, history)
 
             try:
@@ -211,7 +208,6 @@ def run_task(client: OpenAI, task_id: str) -> float:
                 )
                 response_text = completion.choices[0].message.content or ""
             except Exception as exc:
-                # Mirrors sample: model request failed → use fallback
                 print(f"  [LLM error] {exc} — using fallback action")
                 response_text = ""
 
@@ -219,25 +215,23 @@ def run_task(client: OpenAI, task_id: str) -> float:
 
             if DEBUG:
                 print(
-                    f"  Q{step:02d} → project={action.accept_project_id} | "
+                    f"  Q{step:02d} -> project={action.accept_project_id} | "
                     f"hire={action.hire_count} | "
                     f"train=${action.training_budget:,.0f} | "
                     f"stack={action.tech_stack} | "
                     f"rest={action.reduce_workload}"
                 )
 
-            # ── step() ───────────────────────────────────────────────────────
             result      = env.step(action)
             observation = result.observation
             reward      = result.reward
             total_reward += reward
 
-            # Build history line (mirrors sample pattern)
             error_flag   = " ERROR" if observation.last_action_error else ""
             history_line = (
                 f"Q{step}: accepted={action.accept_project_id} "
                 f"stack={action.tech_stack} rest={action.reduce_workload} "
-                f"→ reward {reward:+.3f} "
+                f"-> reward {reward:+.3f} "
                 f"budget=${observation.budget:,.0f} "
                 f"rep={observation.reputation:.2f} "
                 f"burnout={observation.team.burnout:.2f}"
@@ -246,40 +240,39 @@ def run_task(client: OpenAI, task_id: str) -> float:
             history.append(history_line)
 
             print(
-                f"[STEP] {step} | Task: {task_id} | Action: {action.accept_project_id or 'Skip'} | "
+                f"[STEP] {step} | Task: {task_id} | "
+                f"Action: {action.accept_project_id or 'Skip'} | "
                 f"Reward: {reward:+.4f} | Done: {result.done} | "
                 f"Budget: ${observation.budget:,.0f} | Rep: {observation.reputation:.2f}"
             )
 
             if observation.last_action_error:
-                print(f"[STEP] {step} ⚠ Error: {observation.last_action_error}")
+                print(f"[STEP] {step} Warning: {observation.last_action_error}")
 
-            # Mirrors sample: if result.done → episode complete
             if result.done:
                 print("  Episode complete.")
                 break
         else:
             print(f"  Reached max steps ({MAX_STEPS}).")
 
-        # ── Grade ─────────────────────────────────────────────────────────────
+        # Grade — OpenEnv requirement: score must be strictly in (0.0, 1.0)
         try:
             raw_score = env.grade()
-        except Exception as exc:
-            if DEBUG:
-                print(f"  [grade error] {exc} — using fallback score 0.5")
+        except Exception as grade_exc:
+            print(f"  [grade error] {grade_exc} — using fallback score 0.5")
             raw_score = 0.5
 
-        # OpenEnv requirement: scores must be strictly in (0.0, 1.0) — never 0.0, never 1.0
-        final_score = max(0.01, min(0.99, float(raw_score)))
+        # Force score to be strictly between 0.0 and 1.0 (never 0.0, never 1.0)
+        final_score = clamp_score(raw_score)
         print(f"[END] Task: {task_id} | Score: {final_score:.4f} | Total Reward: {total_reward:.4f} | Done: True")
         return final_score
 
-    except Exception as exc:
+    except Exception as task_exc:
         # Ensure [END] is ALWAYS printed — validator requires exactly 3 [END] lines
-        print(f"  [task error] {exc}")
-        final_score = 0.1   # non-zero fallback strictly in (0.0, 1.0)
-        print(f"[END] Task: {task_id} | Score: {final_score:.4f} | Total Reward: {total_reward:.4f} | Done: True")
-        return final_score
+        print(f"  [task error] {task_exc}")
+        fallback_score = 0.1
+        print(f"[END] Task: {task_id} | Score: {fallback_score:.4f} | Total Reward: {total_reward:.4f} | Done: True")
+        return fallback_score
 
     finally:
         env.close()
@@ -300,7 +293,6 @@ def main() -> None:
     for task_id in tasks:
         scores[task_id] = run_task(client, task_id)
 
-    # ── Final score summary ───────────────────────────────────────────────────
     print(f"\n{'='*60}")
     print("  FINAL SCORES")
     print(f"{'='*60}")
