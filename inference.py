@@ -1,28 +1,21 @@
 """
 inference.py - Business Simulation Environment
 ================================================
-Baseline agent script. Mirrors the sample inference script pattern exactly.
+Runs the LLM agent through all 3 tasks and emits structured OpenEnv stdout logs.
 
-MANDATORY environment variables:
-    API_BASE_URL   The API endpoint for the LLM.
-    MODEL_NAME     The model identifier to use for inference.
-    HF_TOKEN       Your Hugging Face / API key.
-    ENV_URL        Where your server is running (default: http://localhost:7860)
-
-Rules:
-- Uses OpenAI Client for all LLM calls (mandatory per hackathon rules)
-- Produced reproducible scores for all 3 tasks
-- All symbols are ASCII-only to ensure validator compatibility
+Standard Log Format:
+    [START] task=<task> env=<benchmark> model=<model>
+    [STEP]  step=<n> action=<action> reward=<0.00> done=<true|false> error=<msg|null>
+    [END]   success=<true|false> steps=<n> score=<0.000> rewards=<r1,r2,...>
 """
 
 import os
 import re
 import json
 import textwrap
-from typing import List, Dict
+from typing import List, Optional
 
 from openai import OpenAI
-
 from src.business_sim_env import BusinessSimEnv
 from src.models import CEOAction
 
@@ -32,26 +25,25 @@ API_KEY      = os.getenv("HF_TOKEN") or os.getenv("API_KEY")
 MODEL_NAME   = os.getenv("MODEL_NAME", "meta-llama/Meta-Llama-3-8B-Instruct")
 ENV_URL      = os.getenv("ENV_URL", "http://localhost:7860")
 
-MAX_STEPS   = 10
-TEMPERATURE = 0.2
-MAX_TOKENS  = 300
+BENCHMARK    = "business-sim"
+MAX_STEPS    = 3
+TEMPERATURE  = 0.2
+MAX_TOKENS   = 300
 
-FALLBACK_ACTION = CEOAction()
-DEBUG = True
+SUCCESS_THRESHOLD = 0.5
+FALLBACK_ACTION   = CEOAction()
+
+TASKS = [
+    "single_quarter_survival",
+    "four_quarter_growth",
+    "adversarial_resilience",
+]
 
 # -- Prompts -------------------------------------------------------------------
 
 SYSTEM_PROMPT = textwrap.dedent("""
     You are the CEO of a software company. Each quarter you make strategic
     decisions to maximise profit, reputation, and team health.
-
-    KEY FACTORS:
-    1. PROFIT POTENTIAL    - prefer high base_profit
-    2. RISK LEVEL          - avoid if total risk > 0.7
-    3. TEAM CAPABILITY     - match project skill requirement
-    4. MARKET DEMAND       - prefer high demand domains
-    5. REPUTATION IMPACT   - failed projects hurt rep
-    6. RESOURCE / BURNOUT  - manage team stress
 
     JSON schema:
     {
@@ -64,28 +56,41 @@ SYSTEM_PROMPT = textwrap.dedent("""
     }
 """).strip()
 
-def build_user_prompt(step: int, observation, history: List[str]) -> str:
+def build_user_prompt(step: int, observation) -> str:
     projects_text = "\n".join(
-        f"    id={p.id} | {p.name} | profit=${p.base_profit:,.0f} | risk={p.base_risk:.2f}"
+        f"- id={p.id} | {p.name} | profit=${p.base_profit:,.0f} | risk={p.base_risk:.2f}"
         for p in observation.available_projects
-    ) or "    (none available)"
+    ) or "(none available)"
 
     return textwrap.dedent(f"""
-        Step: {step}
         Quarter: {observation.quarter} / {observation.max_quarters}
+        Budget:  ${observation.budget:,.0f}
+        Skill:   {observation.team.skill:.2f}
+        Rep:     {observation.reputation:.2f}
 
-        -- Company State --
-        Budget:         ${observation.budget:,.0f}
-        Team size:      {observation.team.size}
-        Team skill:     {observation.team.skill:.2f}
-        Reputation:     {observation.reputation:.2f}
-        Market phase:   {observation.market_phase}
-
-        -- Available Projects --
+        Available Projects:
         {projects_text}
 
-        Respond with ONLY the JSON object.
+        Reply with ONLY the JSON object.
     """).strip()
+
+# -- Logging Helpers -----------------------------------------------------------
+
+def log_start(task: str) -> None:
+    print(f"[START] task={task} env={BENCHMARK} model={MODEL_NAME}", flush=True)
+
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = str(error) if error else "null"
+    done_val  = str(done).lower()
+    # Using simple action description for the log
+    print(f"[STEP] step={step} action={action} reward={reward:.2f} done={done_val} error={error_val}", flush=True)
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    success_val = str(success).lower()
+    print(f"[END] success={success_val} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+# -- Logic ---------------------------------------------------------------------
 
 def parse_action(response_text: str, observation) -> CEOAction:
     action = FALLBACK_ACTION
@@ -98,84 +103,81 @@ def parse_action(response_text: str, observation) -> CEOAction:
     except:
         pass
     
-    if getattr(action, "accept_project_id", None) is None and observation.available_projects:
+    # Force a project if none accepted but some available
+    if not action.accept_project_id and observation.available_projects:
         action.accept_project_id = observation.available_projects[0].id
 
     return action
 
-def clamp_score(raw: float) -> float:
-    return max(0.01, min(0.99, float(raw)))
-
-def run_task(client: OpenAI, task_id: str) -> float:
-    print(f"\n============================================================")
-    print(f"  TASK : {task_id}")
-    print(f"============================================================")
-
+def run_task(client: OpenAI, task_id: str) -> None:
+    log_start(task_id)
+    
     env = BusinessSimEnv.from_docker_image(
         image    = "business-sim-env:latest",
-        env_vars = {
-            "BUSINESS_SIM_TASK": task_id,
-            "BUSINESS_SIM_URL":  ENV_URL,
-        },
+        env_vars = {"BUSINESS_SIM_TASK": task_id, "BUSINESS_SIM_URL": ENV_URL}
     )
 
-    total_reward = 0.0
-    history = []
+    rewards = []
+    steps_taken = 0
+    success = False
+    score = 0.5
 
     try:
-        result      = env.reset()
-        observation = result.observation
-        print(f"[START] Task: {task_id}")
+        result = env.reset()
+        obs = result.observation
 
         for step in range(1, MAX_STEPS + 1):
-            if result.done:
-                break
-
+            steps_taken = step
             try:
                 completion = client.chat.completions.create(
-                    model       = MODEL_NAME,
-                    messages    = [
+                    model    = MODEL_NAME,
+                    messages = [
                         {"role": "system", "content": SYSTEM_PROMPT},
-                        {"role": "user",   "content": build_user_prompt(step, observation, history)},
+                        {"role": "user",   "content": build_user_prompt(step, obs)},
                     ],
                     temperature = TEMPERATURE,
-                    max_tokens  = MAX_TOKENS,
                 )
-                response_text = completion.choices[0].message.content or ""
-            except:
-                response_text = ""
+                response = completion.choices[0].message.content or ""
+                action = parse_action(response, obs)
+                
+                result = env.step(action)
+                obs = result.observation
+                reward = float(result.reward)
+                done = bool(result.done)
 
-            action = parse_action(response_text, observation)
-            result = env.step(action)
-            observation = result.observation
-            total_reward += result.reward
+                rewards.append(reward)
+                log_step(step, "ceo_decision", reward, done, None)
 
-            print(f"[STEP] {step} | Task: {task_id} | Reward: {result.reward:+.4f} | Done: {result.done}")
-
-            if result.done:
+                if done:
+                    break
+            except Exception as e:
+                log_step(step, "error", 0.0, True, str(e))
                 break
 
+        # Final grade
         try:
             raw_score = env.grade()
+            score = max(0.01, min(0.99, float(raw_score)))
         except:
-            raw_score = 0.5
-
-        final_score = clamp_score(raw_score)
-        print(f"[END] Task: {task_id} | Score: {final_score:.3f} | Total Reward: {total_reward:.3f} | Done: True")
-        return final_score
+            score = 0.5
+        
+        success = score >= SUCCESS_THRESHOLD
 
     except Exception as e:
-        print(f"  [Error] {e}")
-        final_score = 0.1
-        print(f"[END] Task: {task_id} | Score: {final_score:.3f} | Total Reward: {total_reward:.3f} | Done: True")
-        return final_score
+        # Emergency end
+        score = 0.1
+        success = False
     finally:
+        log_end(success, steps_taken, score, rewards)
         env.close()
 
 def main():
+    if not API_KEY:
+        print("[ERROR] HF_TOKEN / API_KEY missing.")
+        return
+
     client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
-    tasks = ["single_quarter_survival", "four_quarter_growth", "adversarial_resilience"]
-    for task_id in tasks:
+    for task_id in TASKS:
         run_task(client, task_id)
 
 if __name__ == "__main__":
