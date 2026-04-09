@@ -1,19 +1,26 @@
-"""task_easy.py — Single Quarter Survival grader."""
-
+"""task_easy.py - Single Quarter Survival grader."""
 
 def grade(env) -> float:
     """
     Score based on ending budget after 1 quarter.
-    OpenEnv requirement: scores must be strictly in (0.0, 1.0).
+    Guaranteed strictly in (0.01, 0.99).
+    Very granular to show partial progress.
     """
-    raw_score = 0.5  # default neutral
-
-    if env.budget <= 0:
-        # Partial credit for how close they came to break-even
-        raw_score = max(0.0, 1.0 + env.budget / 50_000.0)
+    # Start with a base score
+    if env.budget <= -50000:
+        raw_score = 0.01
+    elif env.budget <= 0:
+        # Bankrupt but survived part of the quarter / didn't lose everything
+        # Map (-50k, 0) to (0.01, 0.2)
+        raw_score = 0.01 + ((env.budget + 50000) / 50000) * 0.19
+    elif env.budget < 100000:
+        # Survived but lost money
+        # Map (0, 100k) to (0.2, 0.5)
+        raw_score = 0.2 + (env.budget / 100000) * 0.3
     else:
-        profit = env.budget - 100_000.0
-        raw_score = min(1.0, profit / 50_000.0)
+        # Profit!
+        # Map (100k, 200k) to (0.5, 0.99)
+        profit = env.budget - 100000
+        raw_score = 0.5 + min(0.49, (profit / 100000) * 0.49)
 
-    # OpenEnv requirement: scores must be strictly in (0.0, 1.0)
-    return round(min(max(raw_score, 0.01), 0.99), 3)
+    return round(float(raw_score), 4)

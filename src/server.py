@@ -1,14 +1,14 @@
 """
-server.py — FastAPI server exposing the OpenEnv standard API.
+server.py - FastAPI server exposing the OpenEnv standard API.
 
 Endpoints (all required by OpenEnv spec):
-  GET  /           — health check (judges ping this)
-  GET  /health     — health check
-  GET  /tasks      — list all tasks
-  POST /reset      — start new episode, returns CompanyObservation
-  POST /step       — take action, returns StepResult
-  GET  /state      — full internal state + history
-  GET  /grade      — current task score (0.0–1.0)
+  GET  /           - health check (judges ping this)
+  GET  /health     - health check
+  GET  /tasks      - list all tasks
+  POST /reset      - start new episode, returns CompanyObservation
+  POST /step       - take action, returns StepResult
+  GET  /state      - full internal state + history
+  GET  /grade      - current task score (0.01-0.99)
 """
 from fastapi           import FastAPI, HTTPException
 from fastapi.responses import JSONResponse
@@ -26,7 +26,7 @@ app = FastAPI(
     version     = "0.1.0",
 )
 
-# ── In-memory session store ───────────────────────────────────────────────────
+# -- In-memory session store ---------------------------------------------------
 _sessions: dict[str, CompanyEnv] = {}
 
 TASK_CONFIG: dict[str, dict] = {
@@ -51,11 +51,11 @@ TASK_CONFIG: dict[str, dict] = {
 }
 
 
-# ── Health ────────────────────────────────────────────────────────────────────
+# -- Health --------------------------------------------------------------------
 
 @app.get("/")
 def root():
-    """Root health check — judges automated ping."""
+    """Root health check - judges automated ping."""
     return {"status": "ok", "env": "business-sim-env", "version": "0.1.0"}
 
 
@@ -64,7 +64,7 @@ def health():
     return {"status": "ok"}
 
 
-# ── Task listing ──────────────────────────────────────────────────────────────
+# -- Task listing --------------------------------------------------------------
 
 @app.get("/tasks")
 def list_tasks():
@@ -80,12 +80,12 @@ def list_tasks():
     ]
 
 
-# ── Core OpenEnv endpoints ────────────────────────────────────────────────────
+# -- Core OpenEnv endpoints ----------------------------------------------------
 
 @app.post("/reset")
 def reset(task_id: str = "single_quarter_survival"):
     """
-    POST /reset — start a new episode.
+    POST /reset - start a new episode.
     Returns CompanyObservation (includes session_id for subsequent calls).
     """
     if task_id not in TASK_CONFIG:
@@ -107,7 +107,7 @@ def reset(task_id: str = "single_quarter_survival"):
 
 @app.post("/step", response_model=StepResult)
 def step(action: CEOAction, session_id: str):
-    """POST /step — submit CEO action, receive observation + reward."""
+    """POST /step - submit CEO action, receive observation + reward."""
     env = _require_session(session_id)
     if env.done:
         raise HTTPException(400, "Episode is done. Call /reset to start a new one.")
@@ -116,18 +116,18 @@ def step(action: CEOAction, session_id: str):
 
 @app.get("/state", response_model=FullState)
 def state(session_id: str):
-    """GET /state — full internal state including history and counterfactuals."""
+    """GET /state - full internal state including history and counterfactuals."""
     return _require_session(session_id).get_full_state()
 
 
 @app.get("/grade")
 def grade(session_id: str):
-    """GET /grade — current episode score in [0.0, 1.0]."""
+    """GET /grade - current episode score strictly in (0.01, 0.99)."""
     env   = _require_session(session_id)
     cfg   = TASK_CONFIG[env.task_id]
     raw   = cfg["grader"].grade(env)
     # OpenEnv requirement: score must be strictly in (0.0, 1.0)
-    score = min(max(float(raw), 0.01), 0.99)
+    score = min(0.99, max(0.01, float(raw)))
     return {
         "task_id":    env.task_id,
         "score":      round(score, 4),
@@ -136,7 +136,7 @@ def grade(session_id: str):
     }
 
 
-# ── Helper ────────────────────────────────────────────────────────────────────
+# -- Helper --------------------------------------------------------------------
 
 def _require_session(session_id: str) -> CompanyEnv:
     if session_id not in _sessions:

@@ -242,18 +242,18 @@ class CompanyEnv:
                         self.team.burnout = min(1.0,
                                            self.team.burnout + burn_gain)
                         messages.append(
-                            f"Tight deadline: burnout → {self.team.burnout:.2f}"
+                            f"Tight deadline: burnout -> {self.team.burnout:.2f}"
                         )
                     messages.append(msg)
 
-            # ── 8. Burnout penalty (Resource factor) ─────────
+            # -- 8. Burnout penalty (Resource factor) ---------
             if self.team.burnout > 0.6:
                 skill_drain       = self.team.burnout * 0.03
                 self.team.skill   = max(0.05, self.team.skill - skill_drain)
                 reward           -= 0.15
                 messages.append(
-                    f"⚠ High burnout ({self.team.burnout:.2f}) "
-                    f"draining team skill → {self.team.skill:.2f}"
+                    f"!! High burnout ({self.team.burnout:.2f}) "
+                    f"draining team skill -> {self.team.skill:.2f}"
                 )
 
             # ── 9. Tech-debt bleed ────────────────────────────
@@ -423,16 +423,16 @@ class CompanyEnv:
             )
             rep_delta = project.reputation_gain
             msg       = (
-                f"✓ '{project.name}' succeeded "
-                f"+${earned:,.0f} (market×{demand:.1f}, risk={total_risk:.2f})"
+                f"[SUCCESS] '{project.name}' succeeded "
+                f"+${earned:,.0f} (market x {demand:.1f}, risk={total_risk:.2f})"
             )
             return True, earned, msg, rep_delta
         else:
             penalty   = project.base_profit * 0.30 + project.resource_cost
             rep_delta = -project.reputation_loss
             msg       = (
-                f"✗ '{project.name}' FAILED "
-                f"−${penalty:,.0f} (risk={total_risk:.2f}, "
+                f"[FAILED] '{project.name}' FAILED "
+                f"-${penalty:,.0f} (risk={total_risk:.2f}, "
                 f"skill_gap={skill_gap:.2f})"
             )
             return False, -penalty, msg, rep_delta
