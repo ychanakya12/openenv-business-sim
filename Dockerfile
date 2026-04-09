@@ -1,4 +1,5 @@
 # ── Build stage ──────────────────────────────────────────────────────────────
+# Force rebuild: 2026-04-09
 FROM python:3.11-slim
 
 # Metadata
